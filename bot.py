@@ -1,6 +1,6 @@
 import os
 import telebot
-import google.generativeai as genai
+import requests
 from flask import Flask
 from threading import Thread
 
@@ -20,29 +20,42 @@ def keep_alive():
 
 # --- 2. جلب المفاتيح من الـ Secrets ---
 TOKEN = os.environ.get('BOT_TOKEN')
-GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
-
-# --- 3. إعداد ذكاء Gemini (الموديل المحدث) ---
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash')
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 bot = telebot.TeleBot(TOKEN)
 
-# --- 4. أوامر البوت ---
+# --- 3. أوامر البوت ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "هلا بيك! أنا بوت الذكاء الاصطناعي المحدث. اسألني أي شي وبالخدمة.")
+    bot.reply_to(message, "هلا بيك! أنا بوت الذكاء الاصطناعي. اسألني أي شي وبالخدمة.")
 
 @bot.message_handler(func=lambda message: True)
-def handle_message(message):
+def reply(message):
     try:
-        response = model.generate_content(message.text)
-        bot.reply_to(message, response.text)
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "openai/gpt-3.5-turbo",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": message.text
+                    }
+                ]
+            }
+        )
+        data = response.json()
+        text = data["choices"][0]["message"]["content"]
+        bot.reply_to(message, text)
     except Exception as e:
         bot.reply_to(message, str(e))
 
-# --- 5. تشغيل كل شيء ---
+# --- 4. تشغيل كل شيء ---
 if __name__ == "__main__":
     keep_alive()
-    print("البوت انطلق بنجاح وباستخدام موديل Gemini 1.5 Flash...")
+    print("البوت انطلق بنجاح وباستخدام OpenRouter...")
     bot.infinity_polling()
