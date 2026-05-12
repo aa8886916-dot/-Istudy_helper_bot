@@ -25,7 +25,7 @@ ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- Model ---
-MODEL = "google/gemini-flash-1.5"
+MODEL = "google/gemini-2.0-flash-exp:free"
 
 # --- System Prompts ---
 SYSTEM_PROMPT = """أنت أستاذ أكاديمي عراقي كبير ومشجع اسمك "أستاذ زين".
@@ -34,15 +34,15 @@ SYSTEM_PROMPT = """أنت أستاذ أكاديمي عراقي كبير ومشج
 - اشرح كل مسألة خطوة بخطوة بشكل واضح
 - استخدم Markdown للتنسيق (عناوين، نقاط، جدول)
 - استخدم LaTeX للمعادلات الرياضية (مثل: $E=mc^2$)
-- إذا كان الموضوع معقداً، اصنع خريطة ذهنية بالإيموجي والتسلسل الهرمي
+- إذا كان الموضوع معقداً، اصنع الخارطة الذهنية للموضوع 🌳 بالإيموجي والتسلسل الهرمي
 - كن دائماً إيجابياً ومشجعاً"""
 
-TUTOR_PROMPT = """أنت معلم سقراطي عراقي. قاعدتك الذهبية: لا تعطِ الإجابة أبداً بشكل مباشر.
+TUTOR_PROMPT = """أنت مدرّس خصوصي عراقي محترف. قاعدتك الذهبية: لا تعطِ الإجابة أبداً بشكل مباشر.
 بدلاً من ذلك:
 - اسأل أسئلة توجيهية تقود الطالب للإجابة بنفسه
 - أعطِ تلميحات تدريجية
 - شجّع على كل خطوة صحيحة بـ "كفو! وصلت لخطوة مهمة"
-- إذا أجاب الطالب بشكل صحيح تماماً، قل "بطل! إجابة صحيحة 100% 🏆" وأخبره أنه كسب نقطة IQ"""
+- إذا أجاب الطالب بشكل صحيح تماماً، قل "بطل! إجابة صحيحة 100% 🏆" وأخبره أنه كسب نقطة تفوق 🌟"""
 
 # --- Per-user state ---
 memory = {}        # {uid: [messages]}
@@ -59,11 +59,11 @@ user_stats = {}    # {uid: {name, count}}
 def get_action_keyboard():
     kb = types.InlineKeyboardMarkup()
     kb.row(
-        types.InlineKeyboardButton("توضيح أكثر 💡", callback_data="clarify"),
+        types.InlineKeyboardButton("وضح لي أكثر 💡", callback_data="clarify"),
         types.InlineKeyboardButton("اختبرني 📝", callback_data="quiz")
     )
     kb.row(
-        types.InlineKeyboardButton("المختصر المفيد 📋", callback_data="summary")
+        types.InlineKeyboardButton("الخلاصة 📋", callback_data="summary")
     )
     return kb
 
@@ -130,17 +130,18 @@ def safe_delete(chat_id, msg_id):
 def cmd_start(message):
     name = message.from_user.first_name or "بطل"
     bot.reply_to(message,
-        f"هلا {name} 👋\n\n"
-        "أنا *أستاذ زين* — مساعدك الدراسي الذكي 📚\n\n"
-        "ارسلي:\n"
-        "• 💬 أي سؤال نصي\n"
+        f"هلا وسهلا {name} 👋\n\n"
+        "أنا *أستاذ زين* — مدرّسك الخصوصي الذكي 📚\n"
+        "موجود 24/7 أساعدك بكل شي دراسي!\n\n"
+        "📨 *شو تقدر ترسلي؟*\n"
+        "• 💬 أي سؤال دراسي\n"
         "• 🖼 صورة من كتابك أو سبورتك\n"
         "• 📄 ملف PDF للتلخيص\n"
         "• 🎙 رسالة صوتية\n\n"
         "📌 *الأوامر:*\n"
-        "/tutor — وضع التدريس السقراطي 🎓\n"
-        "/plan — مخطط دراسي بوميدورو 📅\n"
-        "/stats — نقاط IQ وإحصائياتك 🏆\n"
+        "/tutor — وضع المدرّس الخصوصي 👨‍🏫\n"
+        "/plan — منظم وقت الدراسة ⏰\n"
+        "/stats — نقاط التفوق وإحصائياتك 🏆\n"
         "/help — دليل الاستخدام",
         parse_mode='Markdown'
     )
@@ -154,11 +155,11 @@ def cmd_help(message):
         "• ارسل صورة (كتاب/سبورة) وأحللها\n"
         "• ارسل PDF وألخصه\n"
         "• ارسل رسالة صوتية وأفهمها\n\n"
-        "🎓 /tutor — وضع توجيه بالأسئلة بدل الإجابة المباشرة\n"
-        "📅 /plan — مخطط دراسي مفصل\n"
-        "🏆 /stats — نقاط IQ والإحصائيات\n\n"
+        "👨‍🏫 /tutor — وضع المدرّس الخصوصي\n"
+        "⏰ /plan — منظم وقت الدراسة\n"
+        "🏆 /stats — نقاط التفوق والإحصائيات\n\n"
         "بعد كل جواب تظهر أزرار:\n"
-        "💡 توضيح أكثر | 📝 اختبرني | 📋 المختصر",
+        "💡 وضح لي أكثر | 📝 اختبرني | 📋 الخلاصة",
         parse_mode='Markdown'
     )
 
@@ -169,9 +170,9 @@ def cmd_tutor(message):
     tutor_mode[uid] = not tutor_mode.get(uid, False)
     if tutor_mode[uid]:
         bot.reply_to(message,
-            "🎓 *وضع التدريس السقراطي مفعّل!*\n\n"
+            "👨‍🏫 *وضع المدرّس الخصوصي مفعّل!*\n\n"
             "راح أوجهك بأسئلة وتلميحات بدل ما أعطيك الجواب مباشرة.\n"
-            "كل إجابة صحيحة = نقطة IQ 🧠",
+            "كل إجابة صحيحة = نقطة تفوق 🌟",
             parse_mode='Markdown'
         )
     else:
@@ -181,7 +182,8 @@ def cmd_tutor(message):
 @bot.message_handler(commands=['plan'])
 def cmd_plan(message):
     msg = bot.reply_to(message,
-        "📅 زيني:\n"
+        "⏰ *منظم وقت الدراسة*\n\n"
+        "زيني:\n"
         "1️⃣ اسم المادة أو المواد\n"
         "2️⃣ تاريخ الامتحان\n\n"
         "مثال: *رياضيات وفيزياء، الامتحان بعد 5 أيام*",
@@ -193,11 +195,11 @@ def cmd_plan(message):
 def generate_plan(message):
     uid = message.chat.id
     bot.send_chat_action(uid, 'typing')
-    wait = bot.reply_to(message, "⏳ جاري إعداد مخططك الدراسي...")
+    wait = bot.reply_to(message, "⏳ جاري تنظيم وقت دراستك...")
     result = call_api([{
         "role": "user",
         "content": (
-            f"اصنع مخططاً دراسياً بأسلوب بوميدورو (25 دقيقة دراسة + 5 دقائق راحة) لـ:\n{message.text}\n\n"
+            f"اصنع جدول دراسي منظم بأسلوب بوميدورو (25 دقيقة دراسة + 5 دقائق راحة) لـ:\n{message.text}\n\n"
             "رتّبه باليوم والساعة، وأضف نصائح مراجعة في نهاية كل يوم."
         )
     }])
@@ -220,7 +222,7 @@ def cmd_stats(message):
         rank = "🌱 مبتدئ"
     bot.reply_to(message,
         f"🏆 *إحصائياتك:*\n\n"
-        f"🧠 نقاط IQ: *{points}*\n"
+        f"🌟 نقاط التفوق: *{points}*\n"
         f"🎖 الرتبة: {rank}\n"
         f"💬 عدد الأسئلة: {count}\n\n"
         f"{'واصل تذاكر وراح تطلع بطل! 💪' if points < 10 else 'كفو، استمر على هذا المستوى! 🔥'}",
@@ -265,7 +267,7 @@ def cmd_adminstats(message):
         f"📊 *إحصائيات النظام:*\n\n"
         f"👥 المستخدمون: {total_users}\n"
         f"💬 إجمالي الرسائل: {total_msgs}\n\n"
-        f"🏆 *أعلى 5 بـ IQ:*\n{top_text}",
+        f"🌟 *أعلى 5 بنقاط التفوق:*\n{top_text}",
         parse_mode='Markdown'
     )
 
