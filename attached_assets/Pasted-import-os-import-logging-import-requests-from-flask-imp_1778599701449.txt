@@ -1,0 +1,184 @@
+import os
+import logging
+import requests
+from flask import Flask
+from threading import Thread
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
+# =========================
+# 🔐 CONFIG
+# =========================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+MODEL = "google/gemini-1.5-flash"
+
+# =========================
+# ⚙️ LOGGING
+# =========================
+logging.basicConfig(level=logging.INFO)
+
+# =========================
+# 🌐 KEEP ALIVE
+# =========================
+app_flask = Flask("")
+
+@app_flask.route("/")
+def home():
+    return "🔥 Legend Bot is LIVE"
+
+def run():
+    app_flask.run(host="0.0.0.0", port=8080)
+
+def keep_alive():
+    Thread(target=run).start()
+
+# =========================
+# 🤖 AI ENGINE (قوي + آمن)
+# =========================
+def ask_ai(prompt: str):
+    try:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        system = """
+أنت مساعد ذكي أسطوري 👨‍🏫🔥
+القواعد:
+- الدراسة: شرح خطوة خطوة + أمثلة
+- الصور: استخراج + حل + شرح
+- الترجمة: دقة عالية
+- الكتابة: احترافية
+- الأسئلة العامة: إجابة واضحة
+- دائماً أضف "الخلاصة 📋" عند الحلول
+- كن بسيط وواضح
+"""
+
+        data = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
+            ]
+        }
+
+        res = requests.post(url, headers=headers, json=data, timeout=40)
+
+        if res.status_code != 200:
+            return "⚠️ مشكلة اتصال مؤقتة"
+
+        return res.json()["choices"][0]["message"]["content"]
+
+    except Exception as e:
+        logging.error(e)
+        return "صار خطأ مؤقت 🤕 حاول مرة ثانية"
+
+# =========================
+# 🚀 START
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = [
+        ["📚 دراسة", "🌍 ترجمة"],
+        ["✍️ كتابة", "🧠 سؤال عام"],
+        ["😂 ترفيه", "📷 صورة"]
+    ]
+
+    await update.message.reply_text(
+        "🔥 أهلاً بطل!\nأنا Legend Bot 👨‍🏫🌍\nأقوى مساعد دراسي + عام + ذكي",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+# =========================
+# 👨‍🏫 MODE
+# =========================
+async def tutor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👨‍🏫 وضع المدرّس مفعّل، ارسل أي سؤال أو صورة")
+
+# =========================
+# 🧠 SMART TEXT HANDLER
+# =========================
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+
+    try:
+        if "شرح" in text:
+            prompt = "اشرح هذا الدرس بطريقة مدرس عراقي مبسط: " + text
+
+        elif "ترجم" in text:
+            prompt = "ترجم النص بدقة: " + text
+
+        elif "اكتب" in text:
+            prompt = "اكتب هذا بشكل احترافي: " + text
+
+        elif "نكتة" in text:
+            prompt = "اعطني نكتة قصيرة مضحكة"
+
+        elif "اختبار" in text:
+            prompt = "أنشئ اختبار مع أجوبة: " + text
+
+        else:
+            prompt = text
+
+        reply = ask_ai(prompt)
+        await update.message.reply_text("🤖 النتيجة:\n\n" + reply)
+
+    except Exception:
+        await update.message.reply_text("صار خطأ، حاول مرة ثانية 🤕")
+
+# =========================
+# 📷 IMAGE HANDLER (محسن)
+# =========================
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+
+        img_url = file.file_path
+
+        prompt = f"""
+هذه صورة من مستخدم.
+
+إذا كانت سؤال:
+- استخرج السؤال بدقة
+- حل خطوة خطوة
+- اشرح مثل مدرس
+- ضع خلاصة 📋
+
+إذا ليست سؤال:
+- صف الصورة بشكل واضح
+
+الصورة: {img_url}
+"""
+
+        reply = ask_ai(prompt)
+
+        await update.message.reply_text("📷 تحليل الصورة:\n\n" + reply)
+
+    except Exception as e:
+        logging.error(e)
+        await update.message.reply_text("ما قدرت أفهم الصورة 🤕 جرّب أوضحها أكثر")
+
+# =========================
+# 🔧 MAIN
+# =========================
+def main():
+    keep_alive()
+
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("tutor", tutor))
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    print("🔥 LEGEND BOT IS RUNNING")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()

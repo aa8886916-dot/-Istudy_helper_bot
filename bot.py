@@ -1,503 +1,245 @@
 import os
-import time
-import base64
+import logging
 import requests
-import telebot
-from telebot import types
 from flask import Flask
 from threading import Thread
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# --- Flask Keep-Alive ---
-app = Flask('')
+# =========================
+# 🔐 CONFIG
+# =========================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-@app.route('/')
-def home(): return "I am alive"
-
-def run(): app.run(host='0.0.0.0', port=8080)
-
-def keep_alive(): Thread(target=run).start()
-
-# --- Secrets ---
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
-
-bot = telebot.TeleBot(BOT_TOKEN)
-
-# --- Model ---
+# موديل ثابت ومستقر
 MODEL = "openai/gpt-4o-mini"
 
-# --- System Prompts ---
-SYSTEM_PROMPT = """أنت أستاذ أكاديمي عراقي كبير ومشجع اسمك "أستاذ زين".
-قواعدك:
-- ناد الطالب دائماً بـ "بطل" أو "كفو" أو "عاش ايدك" بشكل طبيعي ومشجع
-- اشرح كل مسألة خطوة بخطوة بشكل واضح ومرتب
-- استخدم Markdown للتنسيق (عناوين، نقاط، جدول)
-- استخدم LaTeX للمعادلات الرياضية (مثل: $E=mc^2$)
-- إذا كان الموضوع معقداً، اصنع الخارطة الذهنية 🌳 بالإيموجي والتسلسل الهرمي
-- عند طلب الخلاصة، قدّمها في نقاط مرتبة وواضحة تحت عنوان "📋 الخلاصة"
-- كن دائماً إيجابياً ومشجعاً"""
+# =========================
+# ⚙️ LOGGING
+# =========================
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
-TUTOR_PROMPT = """أنت مدرّس خصوصي عراقي محترف. قاعدتك الذهبية: لا تعطِ الإجابة أبداً بشكل مباشر.
-بدلاً من ذلك:
-- اسأل أسئلة توجيهية تقود الطالب للإجابة بنفسه
-- أعطِ تلميحات تدريجية
-- شجّع على كل خطوة صحيحة بـ "كفو! وصلت لخطوة مهمة"
-- إذا أجاب الطالب بشكل صحيح تماماً، قل "بطل! إجابة صحيحة 100% 🏆" وأخبره أنه كسب نقطة تفوق 🌟"""
+# =========================
+# 🌐 KEEP ALIVE (Replit)
+# =========================
+app_flask = Flask(__name__)
 
-# --- Per-user state ---
-memory = {}        # {uid: [messages]}
-tutor_mode = {}    # {uid: bool}
-iq_points = {}     # {uid: int}
-last_request = {}  # {uid: float} anti-spam
-user_stats = {}    # {uid: {name, count}}
+@app_flask.route("/")
+def home():
+    return "🔥 Legend Bot is LIVE"
 
+def run_web():
+    app_flask.run(host="0.0.0.0", port=8080)
 
-# ─────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────
+    def keep_alive():
+        t = Thread(target=run_web)
+        t.daemon = True
+        t.start()
 
-def get_action_keyboard():
-    kb = types.InlineKeyboardMarkup()
-    kb.row(
-        types.InlineKeyboardButton("وضح لي أكثر 💡", callback_data="clarify"),
-        types.InlineKeyboardButton("اختبرني 📝", callback_data="quiz")
-    )
-    kb.row(
-        types.InlineKeyboardButton("الخلاصة 📋", callback_data="summary")
-    )
-    return kb
-
-
-def call_api(messages, system=None):
-    if system is None:
-        system = SYSTEM_PROMPT
-    payload_messages = [{"role": "system", "content": system}] + messages
-    for attempt in range(3):
-        try:
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={"model": MODEL, "messages": payload_messages},
-                timeout=45
-            )
-            data = resp.json()
-            if "choices" in data:
-                return data["choices"][0]["message"]["content"]
-            code = data.get("error", {}).get("code")
-            if code == 429:
-                time.sleep(3)
-                continue
-            return f"خطأ من الخادم: {data.get('error', {}).get('message', str(data))}"
-        except Exception as e:
-            if attempt < 2:
-                time.sleep(3)
-            else:
-                return f"فشل الاتصال بالخادم: {str(e)}"
-    return "تعذّر الاتصال، حاول مرة ثانية."
-
-
-def check_spam(uid):
-    now = time.time()
-    if uid in last_request and now - last_request[uid] < 3:
-        return True
-    last_request[uid] = now
-    return False
-
-
-def track_user(message):
-    uid = message.from_user.id
-    name = message.from_user.first_name or "مجهول"
-    if uid not in user_stats:
-        user_stats[uid] = {"name": name, "count": 0}
-    user_stats[uid]["count"] += 1
-
-
-def safe_delete(chat_id, msg_id):
+# =========================
+# 🤖 AI ENGINE (OpenRouter)
+# =========================
+def ask_ai(prompt: str) -> str:
     try:
-        bot.delete_message(chat_id, msg_id)
-    except Exception:
-        pass
+        url = "https://openrouter.ai/api/v1/chat/completions"
 
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://replit.com",
+            "X-Title": "LegendBot"
+        }
 
-def safe_reply(message, text, keyboard=None):
-    try:
-        bot.reply_to(message, text, parse_mode='Markdown', reply_markup=keyboard)
-    except Exception:
-        try:
-            bot.reply_to(message, text, reply_markup=keyboard)
-        except Exception:
-            pass
+        system_prompt = """
+أنت مساعد ذكي عراقي 👨‍🏫🔥
 
+القواعد:
+- إذا السؤال دراسي: اشرح خطوة خطوة وبأسلوب واضح.
+- إذا رياضيات: حل مرتب مع خطوات.
+- إذا ترجمة: ترجم بدقة.
+- إذا كتابة: اكتب بشكل احترافي.
+- إذا سؤال عام: جاوب باختصار ووضوح.
+- إذا طلب ترفيه: رد بخفة.
+- دائماً أضف "الخلاصة 📋" عند الشرح أو الحل.
+"""
 
-def safe_send(chat_id, text, keyboard=None):
-    try:
-        bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=keyboard)
-    except Exception:
-        try:
-            bot.send_message(chat_id, text, reply_markup=keyboard)
-        except Exception:
-            pass
+        data = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+        }
 
-
-# ─────────────────────────────────────────
-# COMMANDS
-# ─────────────────────────────────────────
-
-@bot.message_handler(commands=['start'])
-def cmd_start(message):
-    name = message.from_user.first_name or "بطل"
-    bot.reply_to(message,
-        f"هلا وسهلا {name} 👋\n\n"
-        "أنا *أستاذ زين* — مدرّسك الخصوصي الذكي 📚\n"
-        "موجود 24/7 أساعدك بكل شي دراسي!\n\n"
-        "📨 *شو تقدر ترسلي؟*\n"
-        "• 💬 أي سؤال دراسي\n"
-        "• 🖼 صورة من كتابك أو سبورتك\n"
-        "• 📄 ملف PDF للتلخيص\n"
-        "• 🎙 رسالة صوتية\n\n"
-        "📌 *الأوامر:*\n"
-        "/tutor — وضع المدرّس الخصوصي 👨‍🏫\n"
-        "/plan — منظم وقت الدراسة ⏰\n"
-        "/stats — نقاط التفوق وإحصائياتك 🏆\n"
-        "/help — دليل الاستخدام",
-        parse_mode='Markdown'
-    )
-
-
-@bot.message_handler(commands=['help'])
-def cmd_help(message):
-    bot.reply_to(message,
-        "📖 *دليل أستاذ زين:*\n\n"
-        "• ارسل سؤالك وأجاوبك خطوة بخطوة\n"
-        "• ارسل صورة (كتاب/سبورة) وأحللها\n"
-        "• ارسل PDF وألخصه\n"
-        "• ارسل رسالة صوتية وأفهمها\n\n"
-        "👨‍🏫 /tutor — وضع المدرّس الخصوصي\n"
-        "⏰ /plan — منظم وقت الدراسة\n"
-        "🏆 /stats — نقاط التفوق والإحصائيات\n\n"
-        "بعد كل جواب تظهر أزرار:\n"
-        "💡 وضح لي أكثر | 📝 اختبرني | 📋 الخلاصة",
-        parse_mode='Markdown'
-    )
-
-
-@bot.message_handler(commands=['tutor'])
-def cmd_tutor(message):
-    uid = message.from_user.id
-    tutor_mode[uid] = not tutor_mode.get(uid, False)
-    if tutor_mode[uid]:
-        bot.reply_to(message,
-            "👨‍🏫 *وضع المدرّس الخصوصي مفعّل!*\n\n"
-            "راح أوجهك بأسئلة وتلميحات بدل ما أعطيك الجواب مباشرة.\n"
-            "كل إجابة صحيحة = نقطة تفوق 🌟",
-            parse_mode='Markdown'
+        res = requests.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=40
         )
-    else:
-        bot.reply_to(message, "✅ رجعنا للوضع العادي. دزلي أي سؤال بطل!")
 
+        # إذا OpenRouter رجع خطأ، خلّه يطلع حتى نعرف السبب
+        if res.status_code != 200:
+            return f"⚠️ OpenRouter Error:\n{res.text}"
 
-@bot.message_handler(commands=['plan'])
-def cmd_plan(message):
-    msg = bot.reply_to(message,
-        "⏰ *منظم وقت الدراسة*\n\n"
-        "زيني:\n"
-        "1️⃣ اسم المادة أو المواد\n"
-        "2️⃣ تاريخ الامتحان\n\n"
-        "مثال: *رياضيات وفيزياء، الامتحان بعد 5 أيام*",
-        parse_mode='Markdown'
-    )
-    bot.register_next_step_handler(msg, generate_plan)
+        result = res.json()
+        return result["choices"][0]["message"]["content"]
 
-
-def generate_plan(message):
-    uid = message.chat.id
-    bot.send_chat_action(uid, 'typing')
-    wait = bot.reply_to(message, "⏳ جاري تنظيم وقت دراستك...")
-    result = call_api([{
-        "role": "user",
-        "content": (
-            f"اصنع جدول دراسي منظم بأسلوب بوميدورو (25 دقيقة دراسة + 5 دقائق راحة) لـ:\n{message.text}\n\n"
-            "رتّبه باليوم والساعة، وأضف نصائح مراجعة في نهاية كل يوم."
-        )
-    }])
-    safe_delete(uid, wait.message_id)
-    safe_reply(message, result)
-
-
-@bot.message_handler(commands=['stats'])
-def cmd_stats(message):
-    uid = message.from_user.id
-    points = iq_points.get(uid, 0)
-    count = user_stats.get(uid, {}).get("count", 0)
-    if points >= 20:
-        rank = "🏅 أستاذ!"
-    elif points >= 10:
-        rank = "⭐ متميز"
-    elif points >= 5:
-        rank = "📈 متقدم"
-    else:
-        rank = "🌱 مبتدئ"
-    bot.reply_to(message,
-        f"🏆 *إحصائياتك:*\n\n"
-        f"🌟 نقاط التفوق: *{points}*\n"
-        f"🎖 الرتبة: {rank}\n"
-        f"💬 عدد الأسئلة: {count}\n\n"
-        f"{'واصل تذاكر وراح تطلع بطل! 💪' if points < 10 else 'كفو، استمر على هذا المستوى! 🔥'}",
-        parse_mode='Markdown'
-    )
-
-
-# ─────────────────────────────────────────
-# ADMIN COMMANDS
-# ─────────────────────────────────────────
-
-@bot.message_handler(commands=['broadcast'])
-def cmd_broadcast(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    text = message.text.replace('/broadcast', '', 1).strip()
-    if not text:
-        bot.reply_to(message, "اكتب الرسالة بعد الأمر.\nمثال: /broadcast أهلاً بالجميع!")
-        return
-    sent = 0
-    for uid in list(user_stats.keys()):
-        try:
-            bot.send_message(uid, f"📢 *إعلان من الإدارة:*\n\n{text}", parse_mode='Markdown')
-            sent += 1
-        except Exception:
-            pass
-    bot.reply_to(message, f"✅ تم الإرسال لـ {sent} مستخدم.")
-
-
-@bot.message_handler(commands=['adminstats'])
-def cmd_adminstats(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    total_users = len(user_stats)
-    total_msgs = sum(v["count"] for v in user_stats.values())
-    top = sorted(iq_points.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_text = "\n".join(
-        f"{i+1}. {user_stats.get(uid, {}).get('name', uid)}: {pts} نقطة"
-        for i, (uid, pts) in enumerate(top)
-    ) or "لا يوجد بيانات"
-    bot.reply_to(message,
-        f"📊 *إحصائيات النظام:*\n\n"
-        f"👥 المستخدمون: {total_users}\n"
-        f"💬 إجمالي الرسائل: {total_msgs}\n\n"
-        f"🌟 *أعلى 5 بنقاط التفوق:*\n{top_text}",
-        parse_mode='Markdown'
-    )
-
-
-# ─────────────────────────────────────────
-# TEXT MESSAGES
-# ─────────────────────────────────────────
-
-@bot.message_handler(func=lambda m: True, content_types=['text'])
-def handle_text(message):
-    uid = message.chat.id
-    if check_spam(uid):
-        bot.reply_to(message, "⏳ انتظر ثانية بين كل سؤال.")
-        return
-    track_user(message)
-    bot.send_chat_action(uid, 'typing')
-    wait = bot.reply_to(message, "🔄 جاري التفكير...")
-
-    if uid not in memory:
-        memory[uid] = []
-    memory[uid].append({"role": "user", "content": message.text})
-    memory[uid] = memory[uid][-10:]
-
-    system = TUTOR_PROMPT if tutor_mode.get(uid) else SYSTEM_PROMPT
-    result = call_api(memory[uid], system=system)
-    memory[uid].append({"role": "assistant", "content": result})
-
-    if tutor_mode.get(uid) and any(w in result for w in ["صحيح 100%", "بطل!", "إجابة صحيحة"]):
-        iq_points[uid] = iq_points.get(uid, 0) + 1
-
-    safe_delete(uid, wait.message_id)
-    safe_reply(message, result, get_action_keyboard())
-
-
-# ─────────────────────────────────────────
-# PHOTO
-# ─────────────────────────────────────────
-
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    uid = message.chat.id
-    if check_spam(uid):
-        bot.reply_to(message, "⏳ انتظر ثانية بين كل طلب.")
-        return
-    track_user(message)
-    bot.send_chat_action(uid, 'upload_photo')
-    wait = bot.reply_to(message, "🔍 جاري تحليل الصورة... انتظر ⏳")
-    try:
-        file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        image_b64 = base64.b64encode(downloaded_file).decode('utf-8')
-        caption = message.caption or (
-            "أنت مساعد دراسي محترف. حلل هذه الصورة: "
-            "إذا كانت سؤالاً فحلّه بالتفصيل خطوة بخطوة، "
-            "وإذا كانت شرحاً أو نصاً فلخّصه وأبرز أهم النقاط."
-        )
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": caption},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
-                    ]}
-                ]
-            },
-            timeout=45
-        )
-        data = resp.json()
-        if "choices" not in data:
-            raise Exception(data.get("error", {}).get("message", str(data)))
-        text = data["choices"][0]["message"]["content"]
-        safe_delete(uid, wait.message_id)
-        safe_reply(message, text, get_action_keyboard())
     except Exception as e:
-        safe_delete(uid, wait.message_id)
-        bot.reply_to(message, f"ما گدرت أقرأ الصورة، جرب صورة أوضح.\nالخطأ: {str(e)}")
+        logging.error(e)
+        return f"🤕 Error:\n{str(e)}"
 
+# =========================
+# 🚀 /start
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        ["📚 دراسة", "🌍 ترجمة"],
+        ["✍️ كتابة", "🧠 سؤال عام"],
+        ["😂 ترفيه", "📷 صورة"]
+    ]
 
-# ─────────────────────────────────────────
-# PDF
-# ─────────────────────────────────────────
-
-@bot.message_handler(content_types=['document'])
-def handle_document(message):
-    uid = message.chat.id
-    if check_spam(uid):
-        bot.reply_to(message, "⏳ انتظر ثانية بين كل طلب.")
-        return
-    track_user(message)
-    if message.document.mime_type != 'application/pdf':
-        bot.reply_to(message, "أرسل ملف PDF فقط.")
-        return
-    bot.send_chat_action(uid, 'typing')
-    wait = bot.reply_to(message, "📄 جاري قراءة الـ PDF... انتظر ⏳")
-    try:
-        import fitz
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        doc = fitz.open(stream=downloaded_file, filetype="pdf")
-        text = "".join(page.get_text() for page in doc)
-        doc.close()
-        if len(text.strip()) < 50:
-            safe_delete(uid, wait.message_id)
-            bot.reply_to(message, "الـ PDF ما يحتوي على نص قابل للقراءة (قد يكون صور فقط).")
-            return
-        if len(text) > 8000:
-            text = text[:8000] + "\n...[مقتطع]"
-        result = call_api([{
-            "role": "user",
-            "content": f"لخّص هذا الملف الدراسي وأبرز أهم النقاط والمفاهيم:\n\n{text}"
-        }])
-        safe_delete(uid, wait.message_id)
-        safe_reply(message, result, get_action_keyboard())
-    except ImportError:
-        safe_delete(uid, wait.message_id)
-        bot.reply_to(message, "⚠️ مكتبة PDF غير متوفرة.")
-    except Exception as e:
-        safe_delete(uid, wait.message_id)
-        bot.reply_to(message, f"ما گدرت أقرأ الـ PDF.\nالخطأ: {str(e)}")
-
-
-# ─────────────────────────────────────────
-# VOICE
-# ─────────────────────────────────────────
-
-@bot.message_handler(content_types=['voice'])
-def handle_voice(message):
-    uid = message.chat.id
-    track_user(message)
-    bot.send_chat_action(uid, 'typing')
-    wait = bot.reply_to(message, "🎙️ جاري فهم رسالتك الصوتية... ⏳")
-    try:
-        file_info = bot.get_file(message.voice.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        audio_b64 = base64.b64encode(downloaded_file).decode('utf-8')
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "استمع لهذه الرسالة الصوتية وأجب على السؤال فيها بالتفصيل."},
-                        {"type": "image_url", "image_url": {"url": f"data:audio/ogg;base64,{audio_b64}"}}
-                    ]}
-                ]
-            },
-            timeout=45
+    await update.message.reply_text(
+        "🔥 أهلاً بطل!\n"
+        "أنا Legend Bot 👨‍🏫🌍\n"
+        "أرسل سؤال، نص، أو صورة وأنا أساعدك.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True
         )
-        data = resp.json()
-        if "choices" not in data:
-            raise Exception(data.get("error", {}).get("message", str(data)))
-        text = data["choices"][0]["message"]["content"]
-        safe_delete(uid, wait.message_id)
-        safe_reply(message, text, get_action_keyboard())
+    )
+
+# =========================
+# 👨‍🏫 /tutor
+# =========================
+async def tutor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👨‍🏫 وضع المدرّس مفعّل.\n"
+        "أرسل أي سؤال وأنا أشرحه بالتفصيل."
+    )
+
+# =========================
+# 🧠 TEXT HANDLER
+# =========================
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        text = update.message.text.strip().lower()
+
+        if "ترجم" in text:
+            prompt = "ترجم هذا النص بدقة:\n" + text
+
+        elif "شرح" in text or "اشرح" in text:
+            prompt = "اشرح هذا الدرس خطوة خطوة:\n" + text
+
+        elif "اكتب" in text:
+            prompt = "اكتب هذا بشكل احترافي:\n" + text
+
+        elif "نكتة" in text:
+            prompt = "اعطني نكتة قصيرة مضحكة"
+
+        elif "اختبار" in text:
+            prompt = "أنشئ اختبار مع أجوبة:\n" + text
+
+        else:
+            prompt = text
+
+        reply = ask_ai(prompt)
+
+        await update.message.reply_text(
+            "🤖 النتيجة:\n\n" + reply
+        )
+
     except Exception as e:
-        safe_delete(uid, wait.message_id)
-        bot.reply_to(message, f"ما گدرت أفهم الرسالة الصوتية.\nالخطأ: {str(e)}")
+        logging.error(e)
+        await update.message.reply_text(
+            "صار خطأ أثناء معالجة الرسالة 🤕"
+        )
 
+# =========================
+# 📷 IMAGE HANDLER
+# =========================
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
 
-# ─────────────────────────────────────────
-# INLINE BUTTON CALLBACKS
-# ─────────────────────────────────────────
+        image_url = file.file_path
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    uid = call.message.chat.id
-    bot.answer_callback_query(call.id, "⏳ جاري المعالجة...")
-    bot.send_chat_action(uid, 'typing')
+        prompt = f"""
+هذه صورة من المستخدم.
 
-    last_msgs = memory.get(uid, [])
-    if not last_msgs:
-        bot.send_message(uid, "ما في محادثة سابقة، ابدأ بسؤال جديد.")
+إذا كانت سؤال دراسي:
+1) استخرج السؤال
+2) حلّه خطوة خطوة
+3) اشرح مثل مدرس
+4) أضف الخلاصة 📋
+
+إذا ليست سؤال:
+صف الصورة بشكل واضح.
+
+رابط الصورة:
+{image_url}
+"""
+
+        reply = ask_ai(prompt)
+
+        await update.message.reply_text(
+            "📷 تحليل الصورة:\n\n" + reply
+        )
+
+    except Exception as e:
+        logging.error(e)
+        await update.message.reply_text(
+            "ما قدرت أفهم الصورة 🤕 حاول بصورة أوضح."
+        )
+
+# =========================
+# 🔧 MAIN
+# =========================
+def main():
+    if not TELEGRAM_TOKEN:
+        print("❌ TELEGRAM_TOKEN missing in Secrets")
         return
 
-    prompts = {
-        "clarify": "وضّح آخر نقطة شرحتها بمثال عملي أبسط وأكثر تفصيلاً",
-        "quiz":    "اصنع سؤال MCQ واحد عن آخر موضوع تحدثنا عنه مع 4 خيارات وبيّن الإجابة الصحيحة",
-        "summary": "لخّص آخر موضوع تحدثنا عنه في نقاط مرتبة لا تتجاوز 10 أسطر"
-    }
-    prompt_text = prompts.get(call.data, "وضّح أكثر")
-    msgs = last_msgs + [{"role": "user", "content": prompt_text}]
-    result = call_api(msgs)
+    if not OPENROUTER_API_KEY:
+        print("❌ OPENROUTER_API_KEY missing in Secrets")
+        return
 
-    memory[uid] = (msgs + [{"role": "assistant", "content": result}])[-10:]
-    safe_send(uid, result, get_action_keyboard())
+    keep_alive()
 
+    app = ApplicationBuilder().token(
+        TELEGRAM_TOKEN
+    ).build()
 
-# ─────────────────────────────────────────
-# LAUNCH
-# ─────────────────────────────────────────
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("tutor", tutor))
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            handle_text
+        )
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.PHOTO,
+            handle_photo
+        )
+    )
+
+    print("🔥 LEGEND BOT IS RUNNING")
+    app.run_polling()
 
 if __name__ == "__main__":
-    keep_alive()
-    print("✅ أستاذ زين انطلق بنجاح!")
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"⚠️ البوت وقف بسبب: {e} — إعادة التشغيل خلال 5 ثواني...")
-            time.sleep(5)
+    main()
