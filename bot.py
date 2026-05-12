@@ -1,22 +1,39 @@
 import os
 import telebot
 import google.generativeai as genai
+from flask import Flask
+from threading import Thread
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-API_KEY = os.environ.get("GEMINI_API_KEY")
+app = Flask('')
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN environment variable is not set")
-if not API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is not set")
+@app.route('/')
+def home(): return "I am alive"
 
-bot = telebot.TeleBot(BOT_TOKEN)
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+def run(): app.run(host='0.0.0.0', port=8080)
+
+def keep_alive(): Thread(target=run).start()
+
+TOKEN = os.environ.get('BOT_TOKEN')
+GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
+
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-pro')
+
+bot = telebot.TeleBot(TOKEN)
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "هلا بيك! البوت اشتغل هسة، دزلي أي سؤال.")
 
 @bot.message_handler(func=lambda message: True)
-def reply(message):
-    res = model.generate_content(message.text)
-    bot.reply_to(message, res.text)
+def handle_message(message):
+    try:
+        response = model.generate_content(message.text)
+        bot.reply_to(message, response.text)
+    except Exception as e:
+        bot.reply_to(message, f"صارت مشكلة تقنية: {str(e)}")
 
-bot.infinity_polling()
+if __name__ == "__main__":
+    keep_alive()
+    print("جاري تشغيل البوت...")
+    bot.infinity_polling()
