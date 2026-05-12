@@ -30,11 +30,12 @@ MODEL = "google/gemini-2.0-flash-exp:free"
 # --- System Prompts ---
 SYSTEM_PROMPT = """أنت أستاذ أكاديمي عراقي كبير ومشجع اسمك "أستاذ زين".
 قواعدك:
-- ناد الطالب دائماً بـ "بطل" أو "كفو" بشكل طبيعي
-- اشرح كل مسألة خطوة بخطوة بشكل واضح
+- ناد الطالب دائماً بـ "بطل" أو "كفو" أو "عاش ايدك" بشكل طبيعي ومشجع
+- اشرح كل مسألة خطوة بخطوة بشكل واضح ومرتب
 - استخدم Markdown للتنسيق (عناوين، نقاط، جدول)
 - استخدم LaTeX للمعادلات الرياضية (مثل: $E=mc^2$)
-- إذا كان الموضوع معقداً، اصنع الخارطة الذهنية للموضوع 🌳 بالإيموجي والتسلسل الهرمي
+- إذا كان الموضوع معقداً، اصنع الخارطة الذهنية 🌳 بالإيموجي والتسلسل الهرمي
+- عند طلب الخلاصة، قدّمها في نقاط مرتبة وواضحة تحت عنوان "📋 الخلاصة"
 - كن دائماً إيجابياً ومشجعاً"""
 
 TUTOR_PROMPT = """أنت مدرّس خصوصي عراقي محترف. قاعدتك الذهبية: لا تعطِ الإجابة أبداً بشكل مباشر.
@@ -122,6 +123,26 @@ def safe_delete(chat_id, msg_id):
         pass
 
 
+def safe_reply(message, text, keyboard=None):
+    try:
+        bot.reply_to(message, text, parse_mode='Markdown', reply_markup=keyboard)
+    except Exception:
+        try:
+            bot.reply_to(message, text, reply_markup=keyboard)
+        except Exception:
+            pass
+
+
+def safe_send(chat_id, text, keyboard=None):
+    try:
+        bot.send_message(chat_id, text, parse_mode='Markdown', reply_markup=keyboard)
+    except Exception:
+        try:
+            bot.send_message(chat_id, text, reply_markup=keyboard)
+        except Exception:
+            pass
+
+
 # ─────────────────────────────────────────
 # COMMANDS
 # ─────────────────────────────────────────
@@ -204,7 +225,7 @@ def generate_plan(message):
         )
     }])
     safe_delete(uid, wait.message_id)
-    bot.reply_to(message, result, parse_mode='Markdown')
+    safe_reply(message, result)
 
 
 @bot.message_handler(commands=['stats'])
@@ -299,7 +320,7 @@ def handle_text(message):
         iq_points[uid] = iq_points.get(uid, 0) + 1
 
     safe_delete(uid, wait.message_id)
-    bot.reply_to(message, result, parse_mode='Markdown', reply_markup=get_action_keyboard())
+    safe_reply(message, result, get_action_keyboard())
 
 
 # ─────────────────────────────────────────
@@ -343,9 +364,11 @@ def handle_photo(message):
             timeout=45
         )
         data = resp.json()
+        if "choices" not in data:
+            raise Exception(data.get("error", {}).get("message", str(data)))
         text = data["choices"][0]["message"]["content"]
         safe_delete(uid, wait.message_id)
-        bot.reply_to(message, text, parse_mode='Markdown', reply_markup=get_action_keyboard())
+        safe_reply(message, text, get_action_keyboard())
     except Exception as e:
         safe_delete(uid, wait.message_id)
         bot.reply_to(message, f"ما گدرت أقرأ الصورة، جرب صورة أوضح.\nالخطأ: {str(e)}")
@@ -385,7 +408,7 @@ def handle_document(message):
             "content": f"لخّص هذا الملف الدراسي وأبرز أهم النقاط والمفاهيم:\n\n{text}"
         }])
         safe_delete(uid, wait.message_id)
-        bot.reply_to(message, result, parse_mode='Markdown', reply_markup=get_action_keyboard())
+        safe_reply(message, result, get_action_keyboard())
     except ImportError:
         safe_delete(uid, wait.message_id)
         bot.reply_to(message, "⚠️ مكتبة PDF غير متوفرة.")
@@ -427,9 +450,11 @@ def handle_voice(message):
             timeout=45
         )
         data = resp.json()
+        if "choices" not in data:
+            raise Exception(data.get("error", {}).get("message", str(data)))
         text = data["choices"][0]["message"]["content"]
         safe_delete(uid, wait.message_id)
-        bot.reply_to(message, text, parse_mode='Markdown', reply_markup=get_action_keyboard())
+        safe_reply(message, text, get_action_keyboard())
     except Exception as e:
         safe_delete(uid, wait.message_id)
         bot.reply_to(message, f"ما گدرت أفهم الرسالة الصوتية.\nالخطأ: {str(e)}")
@@ -460,7 +485,7 @@ def handle_callback(call):
     result = call_api(msgs)
 
     memory[uid] = (msgs + [{"role": "assistant", "content": result}])[-10:]
-    bot.send_message(uid, result, parse_mode='Markdown', reply_markup=get_action_keyboard())
+    safe_send(uid, result, get_action_keyboard())
 
 
 # ─────────────────────────────────────────
