@@ -495,4 +495,9 @@ def handle_callback(call):
 if __name__ == "__main__":
     keep_alive()
     print("✅ أستاذ زين انطلق بنجاح!")
-    bot.infinity_polling()
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"⚠️ البوت وقف بسبب: {e} — إعادة التشغيل خلال 5 ثواني...")
+            time.sleep(5)
