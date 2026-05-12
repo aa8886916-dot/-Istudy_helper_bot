@@ -30,9 +30,9 @@ def reply(message):
     try:
         user_id = message.chat.id
         if user_id not in memory: memory[user_id] = []
-
+        
         memory[user_id].append({"role": "user", "content": message.text})
-        memory[user_id] = memory[user_id][-10:]
+        memory[user_id] = memory[user_id][-10:] # الحفاظ على الذاكرة قصيرة
 
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -41,13 +41,13 @@ def reply(message):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "google/gemini-flash-1.5",
+                "model": "google/gemini-flash-1.5", # استخدمنا هنا جمناي لأنه الأفضل للدراسة
                 "messages": memory[user_id]
             }
         )
         data = response.json()
         text = data["choices"][0]["message"]["content"]
-
+        
         memory[user_id].append({"role": "assistant", "content": text})
         bot.reply_to(message, text)
     except Exception as e:
@@ -68,7 +68,7 @@ def handle_photo(message):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "google/gemini-flash-1.5",
+                "model": "google/gemini-flash-1.5", # جمناي فلاش ممتاز جداً بتحليل صور الكتب
                 "messages": [
                     {
                         "role": "user",
@@ -87,6 +87,6 @@ def handle_photo(message):
         bot.reply_to(message, "ما گدرت أقرأ الصورة بوضوح، جرب تأخذ صورة أقرب.")
 
 if __name__ == "__main__":
-    keep_alive()
+    keep_alive() # تشغيل السيرفر
     print("البوت الدراسي انطلق...")
     bot.infinity_polling()
