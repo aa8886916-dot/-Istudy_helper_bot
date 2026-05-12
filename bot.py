@@ -39,8 +39,7 @@ def handle_message(message):
         response = model.generate_content(message.text)
         bot.reply_to(message, response.text)
     except Exception as e:
-        print(f"Error: {e}")
-        bot.reply_to(message, "اعتذر، واجهت مشكلة بسيطة بمعالجة طلبك. حاول مرة ثانية.")
+        bot.reply_to(message, str(e))
 
 # --- 5. تشغيل كل شيء ---
 if __name__ == "__main__":
