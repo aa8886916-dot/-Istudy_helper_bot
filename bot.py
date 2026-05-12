@@ -24,7 +24,7 @@ GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
 
 # --- 3. إعداد ذكاء Gemini (الموديل المحدث) ---
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 bot = telebot.TeleBot(TOKEN)
 
