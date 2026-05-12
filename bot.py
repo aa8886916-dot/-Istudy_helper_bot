@@ -25,7 +25,7 @@ ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- Model ---
-MODEL = "google/gemini-flash-1.5"
+MODEL = "openai/gpt-4o-mini"
 
 # --- System Prompts ---
 SYSTEM_PROMPT = """أنت أستاذ أكاديمي عراقي كبير ومشجع اسمك "أستاذ زين".
