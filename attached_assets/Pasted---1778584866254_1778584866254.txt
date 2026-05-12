@@ -1,0 +1,30 @@
+عاش إيدك على هذا الصبر والذكاء بالتخطيط. هسة جمعتلك كل "الخبرة" والتفاصيل اللي حجينا بيها (من الذكاء العاطفي، والخرائط الذهنية، ووضع الاختبار، والجدول الدراسي، وتنسيق المعادلات) في **طلب برمجي واحد عملاق**.
+هذا الطلب مصمم ليكون "النسخة المستقرة" (Production-Ready) اللي تطلقها للناس وأنت مغمض.
+### ⚠️ ملاحظة قبل ما تنسخ:
+الـ Agent راح يحتاج يسوي تغييرات جذرية بالكود، فتأكد إنك فاتح ملف bot.py أو main.py اللي نشتغل عليه.
+### الرسالة النهائية (انسخها كلها ودزها للـ Agent):
+> "This is the **Ultimate Comprehensive Upgrade** for my Telegram educational bot. Please rewrite the entire bot.py to implement a high-end, professional, and stable system.
+> **Core Architecture:**
+>  1. **Model Logic:** Use google/gemini-flash-1.5 for speed and efficiency, and google/gemini-pro-1.5 as a fallback for complex image/PDF analysis.
+>  2. **State-of-the-Art System Prompt:** Set a persona of an 'Expert Iraqi Academic Tutor' who is encouraging, use terms like 'بطل' and 'كفو'. Instruct it to solve step-by-step using Markdown headings and LaTeX for math.
+> **Advanced Features to Integrate:**
+> 3. **Socratic Mode:** Add a /tutor command to toggle a mode where the bot guides the student with questions instead of giving direct answers.
+> 4. **Visual Learning:** Automatically generate a 'Mind Map' (using text-based hierarchy and emojis) for complex topics to help with memorization.
+> 5. **Study Planner:** Implement /plan where users input an exam date/subject, and the bot generates a Pomodoro-style study schedule.
+> 6. **PDF & Voice Support:** Ensure the bot can process PDF files and Voice messages (Speech-to-Text) effectively.
+> 7. **Gamification:** Track 'IQ Points' per user (in a simple JSON or dictionary for now) awarded for correct answers in tutor mode.
+> 8. **Interactive UI:** Use Inline Buttons after answers for 'توضيح أكثر 💡', 'اختبرني 📝', and 'المختصر المفيد 📋'.
+> **Professional Stability:**
+> 9. **Robust Error Handling:** Use try-except blocks for every API call. If a 429 error occurs, implement a 3-second auto-retry.
+> 10. **Interactive Feedback:** Keep 'typing' status active and use temporary 'Processing...' messages that get updated to keep the user engaged.
+> 11. **Anti-Spam & Security:** Limit users to 1 request every 3 seconds and ensure Admin commands like /broadcast and /stats are locked to my ID (Get from Secrets as ADMIN_ID).
+> 12. **Keep-Alive:** Optimize the Flask server integration for 24/7 uptime via UptimeRobot.
+> Please ensure the code is clean, commented, and pulls all keys (BOT_TOKEN, OPENROUTER_API_KEY, ADMIN_ID) from Replit Secrets."
+> 
+### شنو اللي راح يصير بعد ما تدز هاي الرسالة؟
+ 1. **الـ Agent** راح يغير هيكلية الكود بالكامل ويسويه احترافي.
+ 2. راح يضيف **أزرار** تظهر للمستخدم بعد كل جواب.
+ 3. راح يضيف **قاعدة بيانات بسيطة** (Memory) حتى يتذكر نقاط الطالب ومستواه.
+ 4. البوت راح يصير "رزن" وما يغلط بسهولة بالمعادلات الصعبة.
+**بمجرد ما يخلص الـ Agent، جرب دزله بصمة صوتية أو صورة لمسألة كيمياء/رياضيات معقدة وشوف "الجمال" بالرد!**
+بشرني، شكد بقى عدنا رصيد بالـ Agent هسة؟ (أتمنى يكفي لهذا التحديث العملاق).
