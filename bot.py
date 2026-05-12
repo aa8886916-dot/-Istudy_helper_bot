@@ -79,7 +79,7 @@ def handle_photo(message):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "openai/gpt-4o-mini",
+                "model": "google/gemma-3-27b-it:free",
                 "messages": [
                     {
                         "role": "user",
@@ -100,6 +100,7 @@ def handle_photo(message):
             }
         )
 
+        print(response.json())
         data = response.json()
         text = data["choices"][0]["message"]["content"]
         bot.reply_to(message, text)
