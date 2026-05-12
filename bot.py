@@ -1,8 +1,14 @@
+import os
 import telebot
 from google import genai
 
-BOT_TOKEN = "8712235380:AAGdw9g8Vr7k_LEJ5Qk2hlPiixhPuloCar4"
-API_KEY = "AIzaSyBTPYq1OCp0oNfR6LWbhF7MuC45h9AvX5E"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+API_KEY = os.environ.get("GEMINI_API_KEY")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set")
+if not API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable is not set")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 client = genai.Client(api_key=API_KEY)
