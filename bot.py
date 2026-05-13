@@ -1,15 +1,18 @@
 import os
+import json
 import logging
 import requests
+
 from flask import Flask
 from threading import Thread
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters,
+    filters
 )
 
 # =========================
@@ -18,228 +21,190 @@ from telegram.ext import (
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# موديل ثابت ومستقر
-MODEL = "openai/gpt-4o-mini"
+# ضع ID الخاص بك هنا أو في Secrets
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+except:
+    ADMIN_ID = 123456789 # استبدله بـ ID مالتك إذا ما ضفته بالـ Secrets
+
+MODEL = os.getenv("MODEL", "openai/gpt-4o-mini")
+
+logging.basicConfig(level=logging.INFO)
 
 # =========================
-# ⚙️ LOGGING
+# 🌐 KEEP ALIVE
 # =========================
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+app = Flask(__name__)
+@app.route("/")
+def home(): return "🔥 ULTIMATE PRO BOT IS LIVE"
+
+def run_web(): app.run(host="0.0.0.0", port=8080)
+def keep_alive(): Thread(target=run_web, daemon=True).start()
 
 # =========================
-# 🌐 KEEP ALIVE (Replit)
+# 💾 DATABASE (نظام الحفظ الذكي)
 # =========================
-app_flask = Flask(__name__)
+DB_FILE = "users.json"
 
-@app_flask.route("/")
-def home():
-    return "🔥 Legend Bot is LIVE"
+def load_db():
+    """هذه الدالة تضمن أن الملف دائماً يبدأ بـ {} وبدون أخطاء"""
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w") as f: json.dump({}, f)
+        return {}
+    with open(DB_FILE, "r") as f:
+        try:
+            data = json.load(f)
+            if not isinstance(data, dict): # إذا لقى قائمة [] قديمة يصفرها فوراً
+                return {}
+            return data
+        except:
+            return {}
 
-def run_web():
-    app_flask.run(host="0.0.0.0", port=8080)
+def save_db(data):
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f, indent=4) # indent حتى يكون شكل الملف مرتب وسهل القراءة
 
-    def keep_alive():
-        t = Thread(target=run_web)
-        t.daemon = True
-        t.start()
+def get_user(db, uid):
+    uid = str(uid) # تحويل الـ ID لنص دائماً لمنع خطأ TypeError
+    if uid not in db:
+        db[uid] = {
+            "name": "",
+            "level": 1,
+            "weakness": {"رياضيات": 0, "فيزياء": 0, "كيمياء": 0, "انكليزي": 0},
+            "chat": []
+        }
+    return db[uid]
 
 # =========================
-# 🤖 AI ENGINE (OpenRouter)
+# 🧠 كاشف نقاط الضعف
 # =========================
-def ask_ai(prompt: str) -> str:
+def detect_weakness(user, text):
+    subjects = {
+        "رياضيات": ["x", "y", "حل", "معادلة", "تكامل", "جذر", "تربيع"],
+        "فيزياء": ["قوة", "سرعة", "طاقة", "نيوتن", "ضغط", "كهرباء"],
+        "كيمياء": ["ذرة", "عنصر", "تفاعل", "مركب", "جدول دوري"],
+        "انكليزي": ["verb", "grammar", "tense", "ترجمة", "english"]
+    }
+    text = text.lower()
+    for subject, keys in subjects.items():
+        for k in keys:
+            if k in text:
+                user["weakness"][subject] = user["weakness"].get(subject, 0) + 1
+
+# =========================
+# 🤖 AI ENGINE
+# =========================
+def ask_ai(messages):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
     try:
-        url = "https://openrouter.ai/api/v1/chat/completions"
-
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://replit.com",
-            "X-Title": "LegendBot"
-        }
-
-        system_prompt = """
-أنت مساعد ذكي عراقي 👨‍🏫🔥
-
-القواعد:
-- إذا السؤال دراسي: اشرح خطوة خطوة وبأسلوب واضح.
-- إذا رياضيات: حل مرتب مع خطوات.
-- إذا ترجمة: ترجم بدقة.
-- إذا كتابة: اكتب بشكل احترافي.
-- إذا سؤال عام: جاوب باختصار ووضوح.
-- إذا طلب ترفيه: رد بخفة.
-- دائماً أضف "الخلاصة 📋" عند الشرح أو الحل.
-"""
-
-        data = {
-            "model": MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ]
-        }
-
-        res = requests.post(
-            url,
-            headers=headers,
-            json=data,
-            timeout=40
-        )
-
-        # إذا OpenRouter رجع خطأ، خلّه يطلع حتى نعرف السبب
-        if res.status_code != 200:
-            return f"⚠️ OpenRouter Error:\n{res.text}"
-
-        result = res.json()
-        return result["choices"][0]["message"]["content"]
-
-    except Exception as e:
-        logging.error(e)
-        return f"🤕 Error:\n{str(e)}"
+        r = requests.post(url, headers=headers, json={"model": MODEL, "messages": messages}, timeout=60)
+        return r.json()["choices"][0]["message"]["content"]
+    except: return "🤕 عذراً، واجهت مشكلة بالاتصال بالذكاء الاصطناعي."
 
 # =========================
-# 🚀 /start
+# 🚀 الأوامر (Handlers)
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+    get_user(db, update.effective_user.id)
+    save_db(db)
+
     keyboard = [
-        ["📚 دراسة", "🌍 ترجمة"],
-        ["✍️ كتابة", "🧠 سؤال عام"],
-        ["😂 ترفيه", "📷 صورة"]
+        ["📚 دراسة", "📷 صورة"],
+        ["🎯 خطتي", "📊 إحصائياتي"],
+        ["🏆 نقاطي"]
     ]
-
     await update.message.reply_text(
-        "🔥 أهلاً بطل!\n"
-        "أنا Legend Bot 👨‍🏫🌍\n"
-        "أرسل سؤال، نص، أو صورة وأنا أساعدك.",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True
-        )
+        "🔥 أهلاً بطل!\nأنا مدرسك الذكي 👨‍🏫\nأرسل أي سؤال أو صورة وخل نبدأ!",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-# =========================
-# 👨‍🏫 /tutor
-# =========================
-async def tutor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👨‍🏫 وضع المدرّس مفعّل.\n"
-        "أرسل أي سؤال وأنا أشرحه بالتفصيل."
-    )
+async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+    user = get_user(db, update.effective_user.id)
+    weakness = max(user["weakness"], key=user["weakness"].get) if any(user["weakness"].values()) else "رياضيات"
+    await update.message.reply_text(f"🎯 **خطة اليوم لـ {user['name']}:**\n\n📚 ركز على: {weakness}\n⏱️ مراجعة 30 دقيقة\n🧠 حل 3 تمارين")
 
-# =========================
-# 🧠 TEXT HANDLER
-# =========================
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+    user = get_user(db, update.effective_user.id)
+    w_info = ", ".join([f"{k}:{v}" for k,v in user["weakness"].items() if v > 0])
+    await update.message.reply_text(f"📊 **إحصائياتك:**\n👤 الاسم: {user['name']}\n📈 المستوى: {user['level']}\n⚠️ تفاعلك: {w_info if w_info else 'لا توجد بيانات'}")
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        text = update.message.text.strip().lower()
+    db = load_db()
+    uid = str(update.effective_user.id)
+    user = get_user(db, uid)
 
-        if "ترجم" in text:
-            prompt = "ترجم هذا النص بدقة:\n" + text
+    if not user["name"]: user["name"] = update.effective_user.first_name or "بطل"
 
-        elif "شرح" in text or "اشرح" in text:
-            prompt = "اشرح هذا الدرس خطوة خطوة:\n" + text
+    text = update.message.text
+    detect_weakness(user, text)
 
-        elif "اكتب" in text:
-            prompt = "اكتب هذا بشكل احترافي:\n" + text
+    user["chat"].append({"role": "user", "content": text})
+    user["chat"] = user["chat"][-10:] # حفظ آخر 10 رسائل فقط للذاكرة
 
-        elif "نكتة" in text:
-            prompt = "اعطني نكتة قصيرة مضحكة"
+    system = f"أنت مدرس عراقي ذكي ومرح. الطالب: {user['name']}. مستواه: {user['level']}."
+    reply = ask_ai([{"role": "system", "content": system}] + user["chat"])
 
-        elif "اختبار" in text:
-            prompt = "أنشئ اختبار مع أجوبة:\n" + text
+    user["chat"].append({"role": "assistant", "content": reply})
+    if len(user["chat"]) % 6 == 0: user["level"] += 1 # زيادة المستوى مع كل 3 حوارات
 
-        else:
-            prompt = text
+    save_db(db)
+    await update.message.reply_text(reply)
 
-        reply = ask_ai(prompt)
-
-        await update.message.reply_text(
-            "🤖 النتيجة:\n\n" + reply
-        )
-
-    except Exception as e:
-        logging.error(e)
-        await update.message.reply_text(
-            "صار خطأ أثناء معالجة الرسالة 🤕"
-        )
-
-# =========================
-# 📷 IMAGE HANDLER
-# =========================
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
-
         image_url = file.file_path
 
-        prompt = f"""
-هذه صورة من المستخدم.
+        prompt = update.message.caption or "حل السؤال بالصورة"
+        res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+            json={"model": MODEL, "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": image_url}}]}]}
+        ).json()
+        await update.message.reply_text("📷 **الحل:**\n\n" + res["choices"][0]["message"]["content"])
+    except: await update.message.reply_text("🤕 خطأ في الصورة.")
 
-إذا كانت سؤال دراسي:
-1) استخرج السؤال
-2) حلّه خطوة خطوة
-3) اشرح مثل مدرس
-4) أضف الخلاصة 📋
+# 👑 ADMIN
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    db = load_db()
+    await update.message.reply_text(f"👑 الإدارة\n👥 الطلاب: {len(db)}")
 
-إذا ليست سؤال:
-صف الصورة بشكل واضح.
-
-رابط الصورة:
-{image_url}
-"""
-
-        reply = ask_ai(prompt)
-
-        await update.message.reply_text(
-            "📷 تحليل الصورة:\n\n" + reply
-        )
-
-    except Exception as e:
-        logging.error(e)
-        await update.message.reply_text(
-            "ما قدرت أفهم الصورة 🤕 حاول بصورة أوضح."
-        )
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID or not context.args: return
+    db = load_db()
+    text = " ".join(context.args)
+    count = 0
+    for uid in db:
+        try:
+            await context.bot.send_message(chat_id=int(uid), text=f"📢 **تنبيه:**\n\n{text}")
+            count += 1
+        except: continue
+    await update.message.reply_text(f"✅ تم الإرسال لـ {count}")
 
 # =========================
-# 🔧 MAIN
+# 🔧 RUN
 # =========================
 def main():
-    if not TELEGRAM_TOKEN:
-        print("❌ TELEGRAM_TOKEN missing in Secrets")
-        return
-
-    if not OPENROUTER_API_KEY:
-        print("❌ OPENROUTER_API_KEY missing in Secrets")
-        return
-
     keep_alive()
+    bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app = ApplicationBuilder().token(
-        TELEGRAM_TOKEN
-    ).build()
+    # Handlers
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CommandHandler("plan", plan))
+    bot.add_handler(CommandHandler("stats", stats))
+    bot.add_handler(CommandHandler("admin", admin))
+    bot.add_handler(CommandHandler("b", broadcast))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("tutor", tutor))
+    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_text
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.PHOTO,
-            handle_photo
-        )
-    )
-
-    print("🔥 LEGEND BOT IS RUNNING")
-    app.run_polling()
+    print("🚀 BOT IS LIVE AND SAVING DATA")
+    bot.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
